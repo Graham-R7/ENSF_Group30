@@ -6,14 +6,13 @@
 #include "parser.h"
 
 #define BUFLEN 1024
+#define MAX_ARGS 64
 
 //To Do: This base file has been provided to help you start the lab, you'll need to heavily modify it to implement all of the features
 
 int main() {
     char buffer[1024];
-    char* parsedinput;
-    char* args[3];
-    char newline;
+    char cleaned[BUFLEN];
 
     printf("Welcome to the Group30 shell! Enter commands, enter 'quit' to exit\n");
     do {
@@ -25,31 +24,38 @@ int main() {
             fprintf(stderr, "Error reading input\n");
             return -1;
         }
-        
-        //Clean and parse the input string
-        parsedinput = (char*) malloc(BUFLEN * sizeof(char));
-        size_t parselength = trimstring(parsedinput, input, BUFLEN);
+
+        trimstring(cleaned, buffer, BUFLEN);
+
+        char *argv[MAX_ARGS + 1];
+        for (int i = 0; i <= MAX_ARGS; ++i) argv[i] = NULL;
+
+        int argc = tokenize(cleaned, argv, MAX_ARGS);
+        if (argc < 0) {
+            fprintf(stderr, "Parse error\n");
+            continue;
+        }
+        if (argc == 0) {
+            continue;
+        }
 
         //Sample shell logic implementation
-        if ( strcmp(parsedinput, "quit") == 0 ) {
+        if (strcmp(argv[0], "quit") == 0 && argc == 1) {
+            for (int i = 0; i < argc; ++i) free(argv[i]);
             printf("Bye!!\n");
             return 0;
-        }
-        else if (parsedinput[0] == '\0') {
-            continue;
         }
         else {
             pid_t path_id = fork();
 
             if (path_id < 0) {
-                perror("fork");
+                for (int i = 0; i < argc; ++i) free(argv[i]);
                 continue;
             }
             else if (path_id == 0) {
-                //Child: execve expects argv array = passing parsedinput and a NULL terminator
-                char *const argv[] = {parsedinput, NULL};
-                extern char **environ; //takes parent's environment for use in exec
-                execve(parsedinput, argv, environ);
+                //takes parent's environment for use in exec
+                extern char **environ;
+                execve(argv[0], argv, environ);
 
                 //Returned execve means failure, something went wrong
                 perror("execve");
@@ -73,11 +79,11 @@ int main() {
                         printf("Child terminated by signal %d\n", signal);
                     }
                 }
+                for (int i = 0; i < argc; ++i) free(argv[i]);
             }
         }
-        
+
         //Remember to free any memory you allocate!
-        free(parsedinput);
     } while ( 1 );
 
     return 0;

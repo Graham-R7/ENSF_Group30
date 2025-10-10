@@ -11,6 +11,8 @@ all: shell.out
 shell.out: shell.c parser.c parser.h
 	$(CC) $(CFLAGS) -o $@ shell.c parser.c
 
-# Clean up build files
+test.out: test.c parser.c parser.h
+	$(CC) $(CFLAGS) -o $@ test.c parser.c
+
 clean:
-	rm -f shell.out
+	rm -f shell.out test.out
