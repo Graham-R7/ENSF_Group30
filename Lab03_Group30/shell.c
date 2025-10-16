@@ -137,30 +137,8 @@ int main() {
 
                 int status;
 
-                if (WIFEXITED(status)) {
-                    int exitcode = WEXITSTATUS(status);
-                    printf("Child exited with %d\n", exitcode);
-                    (void)exitcode;
-                }
-                else if (WIFSIGNALED(status)) {
-                    int signal = WTERMSIG(status);
-                    printf("Child terminated with %d\n", signal);
-                }
-                
-
                 if (waitpid(right_pid, &status, 0) < 0) {
                     perror("waitpid");
-                }
-                else {
-                    if (WIFEXITED(status)) {
-                        int exitcode = WEXITSTATUS(status);
-                        printf("Child exited with %d\n", exitcode);
-                        (void)exitcode;
-                    }
-                    else if (WIFSIGNALED(status)) {
-                        int signal = WTERMSIG(status);
-                        printf("Child terminated with %d\n", signal);
-                    }
                 }
 
                 for (int i = 0; i < argc; ++i) free(argv[i]);
@@ -180,17 +158,6 @@ int main() {
                     int status;
                     if (waitpid(path_id, &status, 0) < 0) {
                         perror("waitpid");
-                    }
-                    else {
-                        if (WIFEXITED(status)) {
-                            int exitcode = WEXITSTATUS(status);
-                            printf("Child exited with %d\n", exitcode);
-                            (void)exitcode;
-                        }
-                        else if (WIFSIGNALED(status)) {
-                            int signal = WTERMSIG(status);
-                            printf("Child terminated with %d\n", signal);
-                        }
                     }
                     for (int i = 0; i < argc; ++i) free(argv[i]);
                     continue;
