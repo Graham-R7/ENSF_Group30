@@ -158,6 +158,78 @@ void policy_LT(int slice)
 
 }
 
+/*
+void policy_LT(int slice) {
+    srand(42);
+    printf("Execution trace with LT:\n");
+
+    int current_time = 0;
+    int jobs_remaining = numofjobs;
+    int total_tickets = 0;
+
+    struct job *temp = head;
+    while (temp != NULL) {
+        total_tickets += (temp->id + 1) * 100;
+        temp->start_time = -1;
+        temp = temp->next;
+    }
+
+    while (jobs_remaining > 0) {
+        int available_tickets = 0;
+        int earliest_arrival = -1;
+        temp = head;
+
+        while (temp != NULL) {
+            if (temp->arrival <= current_time && temp->remaining_time > 0) {
+                available_tickets += (temp->id + 1) * 100;
+            } else if (temp->arrival > current_time && (earliest_arrival == -1 || temp->arrival < earliest_arrival)) {
+                earliest_arrival = temp->arrival;
+            }
+            temp = temp->next;
+        }
+
+        if (available_tickets == 0 && earliest_arrival > current_time) {
+            current_time = earliest_arrival;
+            continue;
+        }
+
+        int winning_ticket = rand() % available_tickets;
+        int ticket_counter = 0;
+
+        struct job *selected_job = NULL;
+        temp = head;
+
+        while (temp != NULL) {
+            if (temp->arrival <= current_time && temp->remaining_time > 0) {
+                ticket_counter += (temp->id + 1) * 100;
+                if (ticket_counter > winning_ticket) {
+                    selected_job = temp;
+                    break;
+                }
+            }
+            temp = temp->next;
+        }
+
+        if (selected_job->start_time == -1) {
+            selected_job->start_time = current_time;
+        }
+
+        int run_time = min(slice, selected_job->remaining_time);
+        printf("t=%d: [Job %d] arrived at [%d], ran for: [%d]\n", current_time, selected_job->id, selected_job->arrival, run_time);
+
+        current_time += run_time;
+        selected_job->remaining_time -= run_time;
+
+        if (selected_job->remaining_time == 0) {
+            selected_job->completion_time = current_time;
+            jobs_remaining--;
+            total_tickets -= (selected_job->id + 1) * 100;
+        }
+    }
+
+    printf("End of execution with LT.\n");
+}
+*/
 
 void policy_FIFO(){
     printf("Execution trace with FIFO:\n");
