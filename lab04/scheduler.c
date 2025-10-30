@@ -107,14 +107,37 @@ void read_job_config(const char* filename)
 }
 
 
-void policy_SJF()
-{
+void policy_SJF() {
     printf("Execution trace with SJF:\n");
+    int t = 0, left = numofjobs;
+    while (left > 0) {
+        struct job *best = NULL, *temp = head;
+        int next_arr = INT_MAX;
+        while (temp) {
+            if (temp->remaining_time > 0) {
+                if (temp->arrival <= t) {
+                    if (!best || temp->length < best->length || (temp->length == best->length && (temp->arrival < best->arrival || (temp->arrival == best->arrival && temp->id < best->id)))) {
+                        best = temp;
+                    }
+                } else if (temp->arrival < next_arr) {
+                    next_arr = temp->arrival;
+                }
+            }
+            temp = temp->next;
+        }
+        if (!best) { t = next_arr; continue; }
+        if (best->start_time == -1) best->start_time = t;
 
-    // TODO: implement SJF policy
+        int run = best->remaining_time;
+        printf("t=%d: [Job %d] arrived at [%d], ran for: [%d]\n",
+               t, best->id, best->arrival, run);
 
+        t += run;
+        best->remaining_time = 0;
+        best->completion_time = t;
+        left--;
+    }
     printf("End of execution with SJF.\n");
-
 }
 
 
@@ -329,8 +352,7 @@ void policy_FIFO(){
         temp->start_time=current_time;
         temp->completion_time=current_time+temp->length;
 
-        printf("t=%d: [Job %d] arrived at [%d], ran for: [%d]\n"
-            ,current_time,temp->id,temp->arrival,temp->length);
+        printf("t=%d: [Job %d] arrived at [%d], ran for: [%d]\n",current_time,temp->id,temp->arrival,temp->length);
 
         current_time+=temp->length;
         temp=temp->next;
@@ -372,13 +394,62 @@ int main(int argc, char **argv){
     if (strcmp(pname, "FIFO") == 0){
         policy_FIFO();
         if (analysis == 1){
-            // TODO: perform analysis
+            printf("Begin analyzing FIFO:\n");
+            struct job* current = head;
+
+            int response_time = 0;
+            int turnaround_time = 0;
+            int wait_time = 0;
+
+            float sum_response = 0.0f;
+            float sum_turnaround = 0.0f;
+            float sum_wait = 0.0f;
+
+            while(current != NULL){
+                response_time = current->start_time - current->arrival;
+                turnaround_time = current->completion_time - current->arrival;
+                wait_time = turnaround_time - current->length;
+
+                printf("Job %d -- Response time: %d  Turnaround: %d  Wait: %d\n",current->id, response_time, turnaround_time, wait_time);
+
+                sum_response += response_time;
+                sum_turnaround += turnaround_time;
+                sum_wait += wait_time;
+
+                current = current->next;
+            }
+            float Response_Avg = sum_response / numofjobs;
+            float Turnaround_Avg = sum_turnaround / numofjobs;
+            float Wait_Avg = sum_wait / numofjobs;
+            printf("Average -- Response: %.2f  Turnaround %.2f  Wait %.2f\n",Response_Avg , Turnaround_Avg, Wait_Avg);
+
+            printf("End analyzing FIFO.\n");
         }
     }
-    else if (strcmp(pname, "SJF") == 0)
-    {
-        // TODO
+    else if (strcmp(pname, "SJF") == 0) {
+    policy_SJF();
+    if (analysis == 1){
+        printf("Begin analyzing SJF:\n");
+        struct job *cur = head;
+        int resp, turn, wait;
+        float s_resp=0, s_turn=0, s_wait=0;
+
+        while (cur){
+            resp = cur->start_time - cur->arrival;
+            turn = cur->completion_time - cur->arrival;
+            wait = turn - cur->length;
+
+            printf("Job %d -- Response time: %d  Turnaround: %d  Wait: %d\n",cur->id, resp, turn, wait);
+            s_resp += resp; 
+            s_turn += turn; 
+            s_wait += wait;
+            cur = cur->next;
+        }
+
+        printf("Average -- Response: %.2f  Turnaround %.2f  Wait %.2f\n", s_resp/numofjobs, s_turn/numofjobs, s_wait/numofjobs);
+        printf("End analyzing SJF.\n");
     }
+}
     else if (strcmp(pname, "STCF") == 0)
     {
         policy_STCF();
