@@ -32,6 +32,12 @@ char** tokenize_input(char* input) {
     return tokens;
 }
 
+void process_instruction(char** tokens, FILE* output_file) {
+    if (tokens[0] == NULL) return;
+    if (tokens[0] == "%%") return;
+    
+}
+
 int main(int argc, char* argv[]) {
     const char usage[] = "Usage: memsym.out <strategy> <input trace> <output trace>\n";
     char* input_trace;
@@ -64,6 +70,7 @@ int main(int argc, char* argv[]) {
         char** tokens = tokenize_input(buffer);
 
         // TODO: Implement your memory simulator
+        process_instruction(tokens, output_file);
 
         // Deallocate tokens
         for (int i = 0; tokens[i] != NULL; i++)
