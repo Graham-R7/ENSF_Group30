@@ -28,20 +28,34 @@ typedef struct {
     pthread_cond_t producer, consumer;
 } TaskQueue;
 
-TaskQueue task_queue;
 Context contexts[NUM_CONTEXTS];
+TaskQueue context_queues[NUM_CONTEXTS];
 FILE *output_file;
+pthread_mutex_t log_mutex;
 
 void handle_set(const int ctx, const int val, FILE* output_file) {
-
+    pthread_mutex_lock(&contexts[ctx].mutex);
+    contexts[ctx].value = val;
+    fprintf(output_file, "ctx %02d: set to value %d\n", ctx, val);
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
 void handle_add(const int ctx, const int val, FILE* output_file) {
-
+    pthread_mutex_lock(&contexts[ctx].mutex);
+    int before = contexts[ctx].value;
+    int after = before + val;
+    contexts[ctx].value = after;
+    fprintf(output_file, "ctx %02d: add %d (result: %d)\n", ctx, val, after);
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
 void handle_sub(const int ctx, const int val, FILE* output_file) {
-
+    pthread_mutex_lock(&contexts[ctx].mutex);
+    int before = contexts[ctx].value;
+    int after = before - val;
+    contexts[ctx].value = after;
+    fprintf(output_file, "ctx %02d: sub %d (result: %d)\n", ctx, val, after);
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
 void handle_mul(const int ctx, const int val, FILE* output_file) {
@@ -64,46 +78,64 @@ void handle_fib(const int ctx, FILE* output_file) {
 
 }
 
-void process_instruction(char** tokens, FILE* output_file) {
-    if (tokens[0] == NULL) return;
+void* context_thread(void* arg) {
+    // Setup
+    int ctx = *(int*)arg;
+    TaskQueue* q = &context_queues[ctx];
+    char log_buffer[10][128];
+    int log_count = 0;
 
-    if (strcmp(tokens[0], "set") == 0) {
-        int ctx = atoi(tokens[1]);
-        int val = atoi(tokens[2]);
-        handle_set(ctx, val, output_file);
-    } else if (strcmp(tokens[0], "add") == 0) {
-        int ctx = atoi(tokens[1]);
-        int val = atoi(tokens[2]);
-        handle_add(ctx, val, output_file);
-    } else if (strcmp(tokens[0], "sub") == 0) {
-        int ctx = atoi(tokens[1]);
-        int val = atoi(tokens[2]);
-        handle_sub(ctx, val, output_file);
-    } else if (strcmp(tokens[0], "mul") == 0) {
-        int ctx = atoi(tokens[1]);
-        int val = atoi(tokens[2]);
-        handle_mul(ctx, val, output_file);
-    } else if (strcmp(tokens[0], "div") == 0) {
-        int ctx = atoi(tokens[1]);
-        int val = atoi(tokens[2]);
-        handle_div(ctx, val, output_file);
-    } else if (strcmp(tokens[0], "pri") == 0) {
-        int ctx = atoi(tokens[1]);
-        handle_pri(ctx, output_file);
-    } else if (strcmp(tokens[0], "pia") == 0) {
-        int ctx = atoi(tokens[1]);
-        handle_pia(ctx, output_file);
-    } else if (strcmp(tokens[0], "fib") == 0) {
-        int ctx = atoi(tokens[1]);
-        handle_fib(ctx, output_file);
-    } else {
-        fprintf(output_file, "Error: Unknown instruction %s\n", tokens[0]);
+    while (1) {
+        pthread_mutex_lock(&q->mutex);
+
+        // Waiting
+        while (q->count == 0) {
+            pthread_cond_wait(&q->consumer, &q->mutex);
+        }
+
+        Task task = q->tasks[q->front];
+        q->front = (q->front + 1) % QUEUE_SIZE;
+        q->count--;
+
+        pthread_mutex_unlock(&q->mutex);
+        pthread_cond_signal(&q->producer);
+
+        // Execute current instruction
+        char* operation = task.operation;
+        int ctx_id = task.context_id;
+        int val = task.operand;
+
+        if (strcmp(operation, "set") == 0) handle_set(ctx_id, val, output_file);
+        else if (strcmp(operation, "add") == 0) handle_add(ctx_id, val, output_file);
+        else if (strcmp(operation, "sub") == 0) handle_sub(ctx_id, val, output_file);
+        else if (strcmp(operation, "mul") == 0) handle_mul(ctx_id, val, output_file);
+        else if (strcmp(operation, "div") == 0) handle_div(ctx_id, val, output_file);
+        else if (strcmp(operation, "pri") == 0) handle_pri(ctx_id, output_file);
+        else if (strcmp(operation, "pia") == 0) handle_pia(ctx_id, output_file);
+        else if (strcmp(operation, "fib") == 0) handle_fib(ctx_id, output_file);
+
+        log_count++;
+
+        if (log_count == 10) {
+            pthread_mutex_lock(&log_mutex);
+            for (int i = 0; i < 10; i++)
+                fputs(log_buffer[i], output_file);
+            pthread_mutex_unlock(&log_mutex);
+            log_count = 0;
+        }
+
+        if (log_count > 0 && q->count == 0) {
+            pthread_mutex_lock(&log_mutex);
+            for (int i = 0; i < log_count; i++)
+                fputs(log_buffer[i], output_file);
+            pthread_mutex_unlock(&log_mutex);
+            log_count = 0;
+        }
     }
 }
 
 int main(int argc, char* argv[]) {
     const char usage[] = "Usage: mathserver.out <input trace> <output trace>\n";
-    char* input_trace;
     char buffer[BUFFER_SIZE];
 
     // Parse command line arguments
@@ -111,41 +143,82 @@ int main(int argc, char* argv[]) {
         printf("%s", usage);
         return 1;
     }
-    
-    input_trace = argv[1];
+
+    char* input_trace = argv[1];
+    char* output_trace = argv[2];
 
     // Open input and output files
     FILE* input_file = fopen(input_trace, "r");
-    output_file = fopen("temp.txt", "w");
+    output_file = fopen(output_trace, "w");
     if (!input_file || !output_file) {
         perror("Error opening files");
         return 1;
     }
 
-    // Making Contexts(16)
+    // Initialize
     for (int i = 0; i < NUM_CONTEXTS; i++) {
         contexts[i].value = 0;
         pthread_mutex_init(&contexts[i].mutex, NULL);
     }
 
-    // Making threads(16)
-    pthread_t threads[NUM_CONTEXTS];
+    pthread_mutex_init(&log_mutex, NULL);
+
+    // Initialize queues
     for (int i = 0; i < NUM_CONTEXTS; i++) {
-       
+        context_queues[i].front = 0;
+        context_queues[i].rear  = 0;
+        context_queues[i].count = 0;
+        pthread_mutex_init(&context_queues[i].mutex, NULL);
+        pthread_cond_init(&context_queues[i].producer, NULL);
+        pthread_cond_init(&context_queues[i].consumer, NULL);
     }
 
-    while ( !feof(input_file) ) {
-        // Read input file line by line
-        char *rez = fgets(buffer, sizeof(buffer), input_file);
-        if ( !rez )
-            break;
-        else {
-            // Remove endline character
-            buffer[strlen(buffer) - 1] = '\0';
+    pthread_t threads[NUM_CONTEXTS];
+    int ids[NUM_CONTEXTS];
+    for (int i = 0; i < NUM_CONTEXTS; i++) {
+        ids[i] = i;
+        pthread_create(&threads[i], NULL, context_thread, &ids[i]);
+    }
+
+    // Read instructions line-by-line
+    while (fgets(buffer, sizeof(buffer), input_file)) {
+        buffer[strcspn(buffer, "\n")] = 0;
+        // Parse
+        char* tokens[4];
+        int tok_i = 0;
+        char* tok = strtok(buffer, " ");
+        while (tok && tok_i < 4) {
+            tokens[tok_i++] = tok;
+            tok = strtok(NULL, " ");
         }
 
-        // CONTINUE...
+        // Skip empty lines
+        if (tok_i == 0) continue;
+
+        Task task;
+        strcpy(task.operation, tokens[0]);
+        task.context_id = atoi(tokens[1]);
+        task.operand = (tok_i >= 3 ? atoi(tokens[2]) : 0);
+
+        int ctx = task.context_id;
+        TaskQueue* q = &context_queues[ctx];
+
+        // Queue task
+        pthread_mutex_lock(&q->mutex);
+
+        // Wait if queue is full
+        while (q->count == QUEUE_SIZE) {
+            pthread_cond_wait(&q->producer, &q->mutex);
+        }
+
+        q->tasks[q->rear] = task;
+        q->rear = (q->rear + 1) % QUEUE_SIZE;
+        q->count++;
+
+        pthread_mutex_unlock(&q->mutex);
+        pthread_cond_signal(&q->consumer);
     }
+
     fclose(input_file);
 
     return 0;
