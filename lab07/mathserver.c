@@ -1,11 +1,37 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
+#include <math.h>
+#include <unistd.h>
+#include <stdarg.h>
 
+#define NUM_CONTEXTS 16
+#define BUFFER_SIZE 1024
+#define QUEUE_SIZE 128
+
+typedef struct {
+    double value;
+    pthread_mutex_t mutex;
+} Context;
+
+typedef struct {
+    char operation[10];
+    int context_id;
+    int operand;
+} Task;
+
+typedef struct {
+    Task tasks[QUEUE_SIZE];
+    int front, rear, count;
+    pthread_mutex_t mutex;
+    pthread_cond_t producer, consumer;
+} TaskQueue;
 
 int main(int argc, char* argv[]) {
     const char usage[] = "Usage: mathserver.out <input trace> <output trace>\n";
     char* input_trace;
-    char buffer[1024];
+    char buffer[BUFFER_SIZE];
 
     // Parse command line arguments
     if (argc != 3) {
