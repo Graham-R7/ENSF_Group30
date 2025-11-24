@@ -26,6 +26,7 @@ typedef struct {
     int front, rear, count;
     pthread_mutex_t mutex;
     pthread_cond_t producer, consumer;
+    int done;
 } TaskQueue;
 
 Context contexts[NUM_CONTEXTS];
@@ -59,12 +60,34 @@ void handle_sub(const int ctx, const int val, FILE* output_file) {
 }
 
 void handle_mul(const int ctx, const int val, FILE* output_file) {
+    pthread_mutex_lock(&contexts[ctx].mutex);
 
+    int before = (int)contexts[ctx].value;
+    int after  = before * val;
+    contexts[ctx].value = after;
+
+    fprintf(output_file, "ctx %02d: mul %d (result: %d)\n", ctx, val, after);
+
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
 void handle_div(const int ctx, const int val, FILE* output_file) {
+    pthread_mutex_lock(&contexts[ctx].mutex);
 
+    int before = (int)contexts[ctx].value;
+    int after;
+    if (val != 0) {
+        after = before / val;
+    } else {
+        after = 0;
+    }
+    contexts[ctx].value = after;
+
+    fprintf(output_file, "ctx %02d: div %d (result: %d)\n", ctx, val, after);
+
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
+
 
 void handle_pri(const int ctx, FILE* output_file) {
 
@@ -75,22 +98,40 @@ void handle_pia(const int ctx, FILE* output_file) {
 }
 
 void handle_fib(const int ctx, FILE* output_file) {
-
+    pthread_mutex_lock(&contexts[ctx].mutex);
+    int n = (int)contexts[ctx].value;
+    if (n <= 0) {
+        contexts[ctx].value = 0;
+        fprintf(output_file, "ctx %02d: fib (result: 0)\n", ctx);
+        pthread_mutex_unlock(&contexts[ctx].mutex);
+        return;
+    }
+    long long a = 0, b = 1;
+    for (int i = 1; i < n; i++) {
+        long long tmp = a + b;
+        a = b;
+        b = tmp;
+    }
+    contexts[ctx].value = (double)b;
+    fprintf(output_file, "ctx %02d: fib (result: %lld)\n", ctx, b);
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
 void* context_thread(void* arg) {
     // Setup
     int ctx = *(int*)arg;
     TaskQueue* q = &context_queues[ctx];
-    char log_buffer[10][128];
-    int log_count = 0;
 
     while (1) {
         pthread_mutex_lock(&q->mutex);
 
-        // Waiting
-        while (q->count == 0) {
+        while (q->count == 0 && !q->done) {
             pthread_cond_wait(&q->consumer, &q->mutex);
+        }
+
+        if (q->count == 0 && q->done) {
+            pthread_mutex_unlock(&q->mutex);
+            break;
         }
 
         Task task = q->tasks[q->front];
@@ -113,25 +154,8 @@ void* context_thread(void* arg) {
         else if (strcmp(operation, "pri") == 0) handle_pri(ctx_id, output_file);
         else if (strcmp(operation, "pia") == 0) handle_pia(ctx_id, output_file);
         else if (strcmp(operation, "fib") == 0) handle_fib(ctx_id, output_file);
-
-        log_count++;
-
-        if (log_count == 10) {
-            pthread_mutex_lock(&log_mutex);
-            for (int i = 0; i < 10; i++)
-                fputs(log_buffer[i], output_file);
-            pthread_mutex_unlock(&log_mutex);
-            log_count = 0;
-        }
-
-        if (log_count > 0 && q->count == 0) {
-            pthread_mutex_lock(&log_mutex);
-            for (int i = 0; i < log_count; i++)
-                fputs(log_buffer[i], output_file);
-            pthread_mutex_unlock(&log_mutex);
-            log_count = 0;
-        }
     }
+    return NULL;
 }
 
 int main(int argc, char* argv[]) {
@@ -168,6 +192,7 @@ int main(int argc, char* argv[]) {
         context_queues[i].front = 0;
         context_queues[i].rear  = 0;
         context_queues[i].count = 0;
+        context_queues[i].done  = 0;   // <--- add this
         pthread_mutex_init(&context_queues[i].mutex, NULL);
         pthread_cond_init(&context_queues[i].producer, NULL);
         pthread_cond_init(&context_queues[i].consumer, NULL);
@@ -221,5 +246,17 @@ int main(int argc, char* argv[]) {
 
     fclose(input_file);
 
+    for (int i = 0; i < NUM_CONTEXTS; i++) {
+        pthread_mutex_lock(&context_queues[i].mutex);
+        context_queues[i].done = 1;
+        pthread_cond_signal(&context_queues[i].consumer);
+        pthread_mutex_unlock(&context_queues[i].mutex);
+    }
+
+    for (int i = 0; i < NUM_CONTEXTS; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    fclose(output_file);
     return 0;
 }
