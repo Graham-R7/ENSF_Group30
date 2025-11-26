@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <math.h>
-#include <unistd.h>
 #include <stdarg.h>
 
 #define NUM_CONTEXTS 16
@@ -34,44 +32,80 @@ TaskQueue context_queues[NUM_CONTEXTS];
 FILE *output_file;
 pthread_mutex_t log_mutex;
 
-void handle_set(const int ctx, const int val, FILE* output_file) {
+void flush_local_logs(char local_logs[10][BUFFER_SIZE], int *log_count) {
+    if (*log_count == 0) return;
+    pthread_mutex_lock(&log_mutex);
+    for (int i = 0; i < *log_count; i++) {
+        fputs(local_logs[i], output_file);
+    }
+    fflush(output_file);
+    pthread_mutex_unlock(&log_mutex);
+    *log_count = 0;
+}
+
+void append_log(char local_logs[10][BUFFER_SIZE], int *log_count, const char *fmt, ...) {
+    // If buffer is full, flush first
+    if (*log_count >= 10) {
+        flush_local_logs(local_logs, log_count);
+    }
+
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(local_logs[*log_count], BUFFER_SIZE, fmt, ap);
+    va_end(ap);
+
+    size_t len = strlen(local_logs[*log_count]);
+    if (len == 0 || local_logs[*log_count][len-1] != '\n') {
+        if (len + 1 < BUFFER_SIZE) {
+            local_logs[*log_count][len] = '\n';
+            local_logs[*log_count][len+1] = '\0';
+        }
+    }
+
+    (*log_count)++;
+    if (*log_count >= 10) {
+        flush_local_logs(local_logs, log_count);
+    }
+}
+
+void handle_set(const int ctx, const int val, char local_logs[10][BUFFER_SIZE], int *log_count) {
     pthread_mutex_lock(&contexts[ctx].mutex);
     contexts[ctx].value = val;
-    fprintf(output_file, "ctx %02d: set to value %d\n", ctx, val);
+    append_log(local_logs, log_count, "ctx %02d: set to value %d\n", ctx, val);
     pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
-void handle_add(const int ctx, const int val, FILE* output_file) {
+void handle_add(const int ctx, const int val, char local_logs[10][BUFFER_SIZE], int *log_count) {
     pthread_mutex_lock(&contexts[ctx].mutex);
     int before = contexts[ctx].value;
     int after = before + val;
     contexts[ctx].value = after;
-    fprintf(output_file, "ctx %02d: add %d (result: %d)\n", ctx, val, after);
+    append_log(local_logs, log_count, "ctx %02d: add %d (result: %d)\n", ctx, val, after);
     pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
-void handle_sub(const int ctx, const int val, FILE* output_file) {
+void handle_sub(const int ctx, const int val, char local_logs[10][BUFFER_SIZE], int *log_count) {
     pthread_mutex_lock(&contexts[ctx].mutex);
     int before = contexts[ctx].value;
     int after = before - val;
     contexts[ctx].value = after;
-    fprintf(output_file, "ctx %02d: sub %d (result: %d)\n", ctx, val, after);
+    append_log(local_logs, log_count, "ctx %02d: sub %d (result: %d)\n", ctx, val, after);
     pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
-void handle_mul(const int ctx, const int val, FILE* output_file) {
+void handle_mul(const int ctx, const int val, char local_logs[10][BUFFER_SIZE], int *log_count) {
     pthread_mutex_lock(&contexts[ctx].mutex);
 
     int before = (int)contexts[ctx].value;
     int after  = before * val;
     contexts[ctx].value = after;
 
-    fprintf(output_file, "ctx %02d: mul %d (result: %d)\n", ctx, val, after);
+    append_log(local_logs, log_count, "ctx %02d: mul %d (result: %d)\n", ctx, val, after);
 
     pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
-void handle_div(const int ctx, const int val, FILE* output_file) {
+void handle_div(const int ctx, const int val, char local_logs[10][BUFFER_SIZE], int *log_count) {
     pthread_mutex_lock(&contexts[ctx].mutex);
 
     int before = (int)contexts[ctx].value;
@@ -83,26 +117,74 @@ void handle_div(const int ctx, const int val, FILE* output_file) {
     }
     contexts[ctx].value = after;
 
-    fprintf(output_file, "ctx %02d: div %d (result: %d)\n", ctx, val, after);
+    append_log(local_logs, log_count, "ctx %02d: div %d (result: %d)\n", ctx, val, after);
 
     pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
-
-void handle_pri(const int ctx, FILE* output_file) {
-
+int isPrime(int num) {
+    if (num <= 1) return 0;
+    for (int i = 2; i * i <= num; i++) {
+        if (num % i == 0) return 0;
+    }
+    return 1;
 }
 
-void handle_pia(const int ctx, FILE* output_file) {
+void handle_pri(const int ctx, char local_logs[10][BUFFER_SIZE], int *log_count) {
+    pthread_mutex_lock(&contexts[ctx].mutex);
 
+    int limit = (int)contexts[ctx].value;
+
+    char line[BUFFER_SIZE];
+    int pos = 0;
+
+    // Start of log entry
+    pos += snprintf(line + pos, BUFFER_SIZE - pos, "ctx %02d: primes (result: ", ctx);
+
+    int first = 1;
+    for (int i = 2; i <= limit; i++) {
+        if (isPrime(i)) {
+            if (!first) {
+                pos += snprintf(line + pos, BUFFER_SIZE - pos, ", ");
+            }
+            pos += snprintf(line + pos, BUFFER_SIZE - pos, "%d", i);
+            first = 0;
+            if (pos >= BUFFER_SIZE - 20) {
+                break;
+            }
+        }
+    }
+
+    snprintf(line + pos, BUFFER_SIZE - pos, ")\n");
+    append_log(local_logs, log_count, "%s", line);
+
+    pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
-void handle_fib(const int ctx, FILE* output_file) {
+void handle_pia(const int ctx, char local_logs[10][BUFFER_SIZE], int *log_count) {
+    pthread_mutex_lock(&contexts[ctx].mutex);
+
+    int iterations = (int)contexts[ctx].value;
+    double sum = 0.0;
+
+    for (int k = 0; k < iterations; k++) {
+        double term = (k % 2 == 0 ? 1.0 : -1.0) / (2.0 * k + 1.0);
+        sum += term;
+    }
+
+    double pi_approx = 4.0 * sum;
+    contexts[ctx].value = pi_approx;
+    append_log(local_logs, log_count, "ctx %02d: pia (result %.15f)\n", ctx, pi_approx);
+
+    pthread_mutex_unlock(&contexts[ctx].mutex);
+}
+
+void handle_fib(const int ctx, char local_logs[10][BUFFER_SIZE], int *log_count) {
     pthread_mutex_lock(&contexts[ctx].mutex);
     int n = (int)contexts[ctx].value;
     if (n <= 0) {
         contexts[ctx].value = 0;
-        fprintf(output_file, "ctx %02d: fib (result: 0)\n", ctx);
+        append_log(local_logs, log_count, "ctx %02d: fib (result: 0)\n", ctx);
         pthread_mutex_unlock(&contexts[ctx].mutex);
         return;
     }
@@ -112,13 +194,14 @@ void handle_fib(const int ctx, FILE* output_file) {
         a = b;
         b = tmp;
     }
-    contexts[ctx].value = (double)b;
-    fprintf(output_file, "ctx %02d: fib (result: %lld)\n", ctx, b);
+    append_log(local_logs, log_count, "ctx %02d: fib (result: %lld)\n", ctx, b);
     pthread_mutex_unlock(&contexts[ctx].mutex);
 }
 
 void* context_thread(void* arg) {
     // Setup
+    char local_logs[10][BUFFER_SIZE];
+    int log_count = 0;
     int ctx = *(int*)arg;
     TaskQueue* q = &context_queues[ctx];
 
@@ -131,6 +214,7 @@ void* context_thread(void* arg) {
 
         if (q->count == 0 && q->done) {
             pthread_mutex_unlock(&q->mutex);
+            flush_local_logs(local_logs, &log_count);
             break;
         }
 
@@ -146,14 +230,14 @@ void* context_thread(void* arg) {
         int ctx_id = task.context_id;
         int val = task.operand;
 
-        if (strcmp(operation, "set") == 0) handle_set(ctx_id, val, output_file);
-        else if (strcmp(operation, "add") == 0) handle_add(ctx_id, val, output_file);
-        else if (strcmp(operation, "sub") == 0) handle_sub(ctx_id, val, output_file);
-        else if (strcmp(operation, "mul") == 0) handle_mul(ctx_id, val, output_file);
-        else if (strcmp(operation, "div") == 0) handle_div(ctx_id, val, output_file);
-        else if (strcmp(operation, "pri") == 0) handle_pri(ctx_id, output_file);
-        else if (strcmp(operation, "pia") == 0) handle_pia(ctx_id, output_file);
-        else if (strcmp(operation, "fib") == 0) handle_fib(ctx_id, output_file);
+        if (strcmp(operation, "set") == 0) handle_set(ctx_id, val, local_logs, &log_count);
+        else if (strcmp(operation, "add") == 0) handle_add(ctx_id, val, local_logs, &log_count);
+        else if (strcmp(operation, "sub") == 0) handle_sub(ctx_id, val, local_logs, &log_count);
+        else if (strcmp(operation, "mul") == 0) handle_mul(ctx_id, val, local_logs, &log_count);
+        else if (strcmp(operation, "div") == 0) handle_div(ctx_id, val, local_logs, &log_count);
+        else if (strcmp(operation, "pri") == 0) handle_pri(ctx_id, local_logs, &log_count);
+        else if (strcmp(operation, "pia") == 0) handle_pia(ctx_id, local_logs, &log_count);
+        else if (strcmp(operation, "fib") == 0) handle_fib(ctx_id, local_logs, &log_count);
     }
     return NULL;
 }
