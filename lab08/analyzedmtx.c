@@ -140,7 +140,52 @@ char* scandmtx(char* filepath) {
         return NULL;
     }
 
-    //Look at dmtxread.c to implement the rest of the dmtx decoding process
+    //------------------------------------------------------------------------------------
+    //Below is from dmtxread.c
+
+    /* Initialize scan */
+    dec = dmtxDecodeCreate(img, opt.shrinkMin);
+    if(dec == NULL) {
+        CleanupMagick(&wand, DmtxFalse);
+        FatalError(EX_SOFTWARE, "decode create error");
+    }
+
+    pageScanCount = 0;
+    for(;;) {
+        /* Find next barcode region within image, but do not decode yet */
+        if(opt.timeoutMS == DmtxUndefined)
+            reg = dmtxRegionFindNext(dec, NULL);
+        else
+            reg = dmtxRegionFindNext(dec, &timeout);
+
+        /* Finished file or ran out of time before finding another region */
+        if(reg == NULL)
+            break;
+
+        /* Decode region based on requested barcode mode */
+        if(opt.mosaic == DmtxTrue)
+            msg = dmtxDecodeMosaicRegion(dec, reg, opt.correctionsMax);
+        else
+            msg = dmtxDecodeMatrixRegion(dec, reg, opt.correctionsMax);
+
+        if(msg != NULL) {
+            PrintStats(dec, reg, msg, imgPageIndex, &opt);
+            PrintMessage(reg, msg, &opt);
+
+            pageScanCount++;
+            imgScanCount++;
+
+            dmtxMessageDestroy(&msg);
+        }
+
+        dmtxRegionDestroy(&reg);
+
+        if(opt.stopAfter != DmtxUndefined && imgScanCount >= opt.stopAfter)
+            break;
+    }
+
+    //Above is from dmtxread.c
+    //------------------------------------------------------------------------------------
     
     dmtxImageDestroy(&img);
     DestroyMagickWand(wand);
